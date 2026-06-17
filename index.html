@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>내 운동 루틴</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <h1>내 운동 루틴 <span aria-hidden="true">💪</span></h1>
+        <time id="todayDate"></time>
+      </header>
+
+      <section class="streak-card" aria-label="이번 주 운동 기록">
+        <div class="streak-count">
+          <strong id="streakCount">0</strong>
+          <span>일 연속 <span aria-hidden="true">🔥</span></span>
+        </div>
+        <div class="week-dots" id="weekDots"></div>
+        <span class="week-caption">이번 주</span>
+      </section>
+
+      <nav class="tabbar" aria-label="앱 메뉴">
+        <button class="tab-button active" data-screen="today" type="button">
+          <i data-lucide="calendar-check"></i>
+          오늘 루틴
+        </button>
+        <button class="tab-button" data-screen="camera" type="button">
+          <i data-lucide="camera"></i>
+          사진 기록
+        </button>
+        <button class="tab-button" data-screen="stats" type="button">
+          <i data-lucide="bar-chart-3"></i>
+          통계
+        </button>
+      </nav>
+
+      <section class="screen active" id="screenToday" aria-label="요일별 운동 루틴">
+        <div class="day-list" id="dayList"></div>
+      </section>
+
+      <section class="screen" id="screenCamera" aria-label="카메라 운동 측정">
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Camera</p>
+              <h2>움직임 측정</h2>
+            </div>
+            <select id="cameraExercise" aria-label="측정할 운동 선택"></select>
+          </div>
+
+          <div class="video-stage">
+            <video id="cameraVideo" playsinline muted></video>
+            <canvas id="poseCanvas"></canvas>
+            <div class="camera-empty" id="cameraEmpty">
+              <i data-lucide="scan-line"></i>
+              <p>카메라를 켜고 전신이 보이게 서세요.</p>
+            </div>
+          </div>
+
+          <div class="camera-controls">
+            <button class="primary-button" id="cameraButton" type="button">
+              <i data-lucide="camera"></i>
+              카메라 켜기
+            </button>
+            <button class="ghost-button" id="resetCounterButton" type="button">
+              <i data-lucide="refresh-cw"></i>
+              카운터 초기화
+            </button>
+          </div>
+
+          <div class="measure-card">
+            <div>
+              <strong id="repCount">0</strong>
+              <span id="repLabel">회</span>
+            </div>
+            <div class="motion-meter"><span id="motionMeter"></span></div>
+            <p id="motionFeedback">운동을 선택하면 자세를 보고 횟수나 시간을 추정해요.</p>
+          </div>
+        </section>
+      </section>
+
+      <section class="screen" id="screenStats" aria-label="운동 통계">
+        <section class="stats-grid">
+          <article class="stat-card">
+            <span>완료한 세트</span>
+            <strong id="totalSets">0</strong>
+          </article>
+          <article class="stat-card">
+            <span>이번 주 달성</span>
+            <strong><span id="weekComplete">0</span>/5</strong>
+          </article>
+          <article class="stat-card">
+            <span>전체 진행률</span>
+            <strong id="weekProgress">0%</strong>
+          </article>
+          <article class="stat-card">
+            <span>오늘 진행률</span>
+            <strong id="todayProgress">0%</strong>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Week</p>
+              <h2>요일별 달성률</h2>
+            </div>
+          </div>
+          <div class="bar-chart" id="weekBars"></div>
+        </section>
+      </section>
+    </main>
+
+    <div class="modal-backdrop" id="guideBackdrop" hidden>
+      <section class="guide-sheet" role="dialog" aria-modal="true" aria-labelledby="guideTitle">
+        <button class="icon-button close-button" id="guideCloseButton" type="button" aria-label="가이드 닫기">
+          <i data-lucide="x"></i>
+        </button>
+        <span class="sheet-handle"></span>
+        <p class="eyebrow">How To</p>
+        <h2 id="guideTitle">운동 가이드</h2>
+        <p id="guideIntro"></p>
+        <ol id="guideSteps"></ol>
+        <div class="timer-box">
+          <div>
+            <span>타이머</span>
+            <strong id="timerDisplay">00:30</strong>
+          </div>
+          <button class="primary-button" id="timerButton" type="button">
+            <i data-lucide="play"></i>
+            시작
+          </button>
+        </div>
+        <div class="guide-actions">
+          <button class="ghost-button" id="guideCameraButton" type="button">
+            <i data-lucide="scan-line"></i>
+            카메라로 측정
+          </button>
+          <button class="ghost-button" id="minusTimeButton" type="button" aria-label="타이머 줄이기">
+            <i data-lucide="minus"></i>
+          </button>
+          <button class="ghost-button" id="plusTimeButton" type="button" aria-label="타이머 늘리기">
+            <i data-lucide="plus"></i>
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
