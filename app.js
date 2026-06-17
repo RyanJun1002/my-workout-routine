@@ -142,6 +142,7 @@ const state = {
     pendingSince: 0,
     lastCountAt: 0,
     peakSignal: 0,
+    lowSignal: 1,
     smoothedSignal: null,
     holdStarted: null,
     lastMotion: null,
@@ -169,6 +170,8 @@ const els = {
   repLabel: document.querySelector("#repLabel"),
   motionMeter: document.querySelector("#motionMeter"),
   motionFeedback: document.querySelector("#motionFeedback"),
+  cameraGuideTitle: document.querySelector("#cameraGuideTitle"),
+  cameraGuideSteps: document.querySelector("#cameraGuideSteps"),
   resetCounterButton: document.querySelector("#resetCounterButton"),
   totalSets: document.querySelector("#totalSets"),
   weekComplete: document.querySelector("#weekComplete"),
@@ -482,6 +485,17 @@ function renderCameraOptions() {
     ? selected
     : unique.find((exercise) => exercise.name === selectedExercise?.name)?.id || unique[0]?.id;
   updateTrackerLabel();
+  renderCameraGuide();
+}
+
+function renderCameraGuide() {
+  const exerciseId = els.cameraExercise.value;
+  const exercise = days.flatMap((day) => day.items || []).find((candidate) => candidate.id === exerciseId);
+  const detail = guides[exerciseId] || guide("천천히 진행하고 통증이 있으면 바로 쉬세요.", ["준비 자세를 확인해요.", "목표 횟수나 시간을 진행해요."]);
+  const tracker = trackers[exerciseId] || { kind: "rep" };
+  const countTip = tracker.kind === "time" ? "카메라가 자세를 유지한 시간을 초 단위로 세요." : "내려가거나 들어 올린 뒤 다시 돌아오면 1회로 세요.";
+  els.cameraGuideTitle.textContent = exercise?.name || "운동 선택";
+  els.cameraGuideSteps.innerHTML = [countTip, ...detail.steps.slice(0, 3)].map((step) => `<li>${step}</li>`).join("");
 }
 
 function openGuide(dayId, exerciseId) {
@@ -710,24 +724,24 @@ function analyzePose(landmarks) {
 
   let signal = 0;
   if (tracker.mode === "squat") {
-    signal = normalize(170 - Math.min(metrics.leftKnee, metrics.rightKnee), 15, 75);
+    signal = normalize(170 - Math.min(metrics.leftKnee, metrics.rightKnee), 10, 70);
     signal = smoothSignal(signal);
-    countByThreshold(signal, 0.58, 0.42, { minHold: 100, minRange: 0.18, cooldown: 650 });
+    countByThreshold(signal, 0.42, 0.34, { minHold: 60, minRange: 0.13, minReturn: 0.1, cooldown: 520 });
     els.motionFeedback.textContent = signal > 0.7 ? "좋아요. 올라올 때도 천천히 버텨요." : "무릎과 발끝 방향을 맞춰요.";
   } else if (tracker.mode === "pushup") {
     signal = normalize(170 - Math.min(metrics.leftElbow, metrics.rightElbow), 20, 85);
     signal = smoothSignal(signal);
-    countByThreshold(signal, 0.62, 0.4, { minHold: 100, minRange: 0.2, cooldown: 650 });
+    countByThreshold(signal, 0.48, 0.34, { minHold: 60, minRange: 0.14, minReturn: 0.11, cooldown: 540 });
     els.motionFeedback.textContent = signal > 0.65 ? "몸을 일직선으로 유지해요." : "팔꿈치를 천천히 굽혀요.";
   } else if (tracker.mode === "arms") {
     signal = normalize(metrics.wristLift, 0.05, 0.35);
     signal = smoothSignal(signal);
-    countByThreshold(signal, 0.62, 0.42, { minHold: 90, minRange: 0.18, cooldown: 600 });
+    countByThreshold(signal, 0.5, 0.35, { minHold: 50, minRange: 0.14, minReturn: 0.1, cooldown: 500 });
     els.motionFeedback.textContent = "어깨가 으쓱 올라가지 않게 목을 길게 둬요.";
   } else if (tracker.mode === "knees") {
     signal = normalize(metrics.kneeDrive, 0.06, 0.28);
     signal = smoothSignal(signal);
-    countByThreshold(signal, 0.6, 0.38, { minHold: 90, minRange: 0.18, cooldown: 560 });
+    countByThreshold(signal, 0.5, 0.34, { minHold: 50, minRange: 0.14, minReturn: 0.1, cooldown: 480 });
     els.motionFeedback.textContent = "복부에 힘을 주고 허리가 꺾이지 않게 해요.";
   } else if (tracker.mode === "hold") {
     signal = getHoldSignal(metrics, els.cameraExercise.value);
@@ -788,6 +802,7 @@ function resetMotionState() {
   state.camera.pendingPhase = null;
   state.camera.pendingSince = 0;
   state.camera.peakSignal = 0;
+  state.camera.lowSignal = 1;
   state.camera.smoothedSignal = null;
   state.camera.holdStarted = null;
   state.camera.lastMotion = null;
@@ -807,12 +822,15 @@ function normalize(value, min, max) {
 
 function countByThreshold(signal, down, up, options = {}) {
   const now = performance.now();
-  const minHold = options.minHold ?? 100;
-  const cooldown = options.cooldown ?? 620;
-  const minRange = options.minRange ?? 0.18;
+  const minHold = options.minHold ?? 60;
+  const cooldown = options.cooldown ?? 520;
+  const minRange = options.minRange ?? 0.13;
+  const minReturn = options.minReturn ?? Math.max(0.08, minRange * 0.75);
 
   if (state.camera.phase === "up") {
-    if (signal > down) {
+    state.camera.lowSignal = Math.min(state.camera.lowSignal, signal);
+    const movedEnough = signal > down || signal - state.camera.lowSignal >= minRange;
+    if (movedEnough) {
       if (state.camera.pendingPhase !== "down") {
         state.camera.pendingPhase = "down";
         state.camera.pendingSince = now;
@@ -829,7 +847,9 @@ function countByThreshold(signal, down, up, options = {}) {
   }
 
   state.camera.peakSignal = Math.max(state.camera.peakSignal, signal);
-  if (signal < up && state.camera.peakSignal - signal >= minRange) {
+  const returnedEnough = signal < up || state.camera.peakSignal - signal >= minReturn;
+  const completedRange = state.camera.peakSignal - state.camera.lowSignal >= minRange;
+  if (returnedEnough && completedRange) {
     if (state.camera.pendingPhase !== "up") {
       state.camera.pendingPhase = "up";
       state.camera.pendingSince = now;
@@ -838,6 +858,7 @@ function countByThreshold(signal, down, up, options = {}) {
       state.camera.phase = "up";
       state.camera.lastCountAt = now;
       state.camera.peakSignal = 0;
+      state.camera.lowSignal = signal;
       state.camera.pendingPhase = null;
       state.camera.count += 1;
     }
@@ -847,7 +868,7 @@ function countByThreshold(signal, down, up, options = {}) {
 }
 
 function countHold(signal) {
-  if (signal > 0.54) {
+  if (signal > 0.48) {
     state.camera.holdStarted ??= performance.now();
     state.camera.count = Math.floor((performance.now() - state.camera.holdStarted) / 1000);
   } else {
@@ -857,7 +878,7 @@ function countHold(signal) {
 
 function countGeneralMotion(motion) {
   const signal = smoothSignal(normalize(motion, 0.008, 0.035));
-  countByThreshold(signal, 0.68, 0.36, { minHold: 140, minRange: 0.22, cooldown: 760 });
+  countByThreshold(signal, 0.55, 0.3, { minHold: 90, minRange: 0.16, minReturn: 0.1, cooldown: 620 });
   return signal;
 }
 
@@ -874,6 +895,7 @@ function resetCounter() {
   els.repCount.textContent = "0";
   els.motionMeter.style.width = "0%";
   updateTrackerLabel();
+  renderCameraGuide();
 }
 
 function updateTrackerLabel() {
