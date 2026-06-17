@@ -468,8 +468,19 @@ function renderStats() {
 function renderCameraOptions() {
   const selected = els.cameraExercise.value;
   const trackable = days.flatMap((day) => day.items || []).filter((exercise) => trackers[exercise.id]);
-  els.cameraExercise.innerHTML = trackable.map((exercise) => `<option value="${exercise.id}">${exercise.name}</option>`).join("");
-  els.cameraExercise.value = trackable.some((exercise) => exercise.id === selected) ? selected : trackable[0]?.id;
+  const selectedExercise = trackable.find((exercise) => exercise.id === selected);
+  const unique = [];
+  const seenNames = new Set();
+  trackable.forEach((exercise) => {
+    if (!seenNames.has(exercise.name)) {
+      seenNames.add(exercise.name);
+      unique.push(exercise);
+    }
+  });
+  els.cameraExercise.innerHTML = unique.map((exercise) => `<option value="${exercise.id}">${exercise.name}</option>`).join("");
+  els.cameraExercise.value = unique.some((exercise) => exercise.id === selected)
+    ? selected
+    : unique.find((exercise) => exercise.name === selectedExercise?.name)?.id || unique[0]?.id;
   updateTrackerLabel();
 }
 
@@ -690,7 +701,7 @@ function analyzePose(landmarks) {
   }
   const tracker = trackers[els.cameraExercise.value] || { mode: "motion", kind: "rep", label: "회" };
   const metrics = getMetrics(landmarks);
-  if (metrics.visibility < 0.55) {
+  if (metrics.visibility < 0.48) {
     resetMotionState();
     els.motionMeter.style.width = "0%";
     els.motionFeedback.textContent = "몸 전체가 더 잘 보이게 카메라에서 조금 멀어져 보세요.";
@@ -701,22 +712,22 @@ function analyzePose(landmarks) {
   if (tracker.mode === "squat") {
     signal = normalize(170 - Math.min(metrics.leftKnee, metrics.rightKnee), 15, 75);
     signal = smoothSignal(signal);
-    countByThreshold(signal, 0.76, 0.3, { minRange: 0.34, cooldown: 750 });
+    countByThreshold(signal, 0.58, 0.42, { minHold: 100, minRange: 0.18, cooldown: 650 });
     els.motionFeedback.textContent = signal > 0.7 ? "좋아요. 올라올 때도 천천히 버텨요." : "무릎과 발끝 방향을 맞춰요.";
   } else if (tracker.mode === "pushup") {
     signal = normalize(170 - Math.min(metrics.leftElbow, metrics.rightElbow), 20, 85);
     signal = smoothSignal(signal);
-    countByThreshold(signal, 0.72, 0.28, { minRange: 0.32, cooldown: 750 });
+    countByThreshold(signal, 0.62, 0.4, { minHold: 100, minRange: 0.2, cooldown: 650 });
     els.motionFeedback.textContent = signal > 0.65 ? "몸을 일직선으로 유지해요." : "팔꿈치를 천천히 굽혀요.";
   } else if (tracker.mode === "arms") {
     signal = normalize(metrics.wristLift, 0.05, 0.35);
     signal = smoothSignal(signal);
-    countByThreshold(signal, 0.76, 0.32, { minRange: 0.34, cooldown: 700 });
+    countByThreshold(signal, 0.62, 0.42, { minHold: 90, minRange: 0.18, cooldown: 600 });
     els.motionFeedback.textContent = "어깨가 으쓱 올라가지 않게 목을 길게 둬요.";
   } else if (tracker.mode === "knees") {
     signal = normalize(metrics.kneeDrive, 0.06, 0.28);
     signal = smoothSignal(signal);
-    countByThreshold(signal, 0.72, 0.3, { minRange: 0.3, cooldown: 650 });
+    countByThreshold(signal, 0.6, 0.38, { minHold: 90, minRange: 0.18, cooldown: 560 });
     els.motionFeedback.textContent = "복부에 힘을 주고 허리가 꺾이지 않게 해요.";
   } else if (tracker.mode === "hold") {
     signal = getHoldSignal(metrics, els.cameraExercise.value);
@@ -767,7 +778,7 @@ function smoothSignal(signal) {
   if (state.camera.smoothedSignal === null) {
     state.camera.smoothedSignal = signal;
   } else {
-    state.camera.smoothedSignal = state.camera.smoothedSignal * 0.72 + signal * 0.28;
+    state.camera.smoothedSignal = state.camera.smoothedSignal * 0.58 + signal * 0.42;
   }
   return state.camera.smoothedSignal;
 }
@@ -796,9 +807,9 @@ function normalize(value, min, max) {
 
 function countByThreshold(signal, down, up, options = {}) {
   const now = performance.now();
-  const minHold = options.minHold ?? 170;
-  const cooldown = options.cooldown ?? 700;
-  const minRange = options.minRange ?? 0.28;
+  const minHold = options.minHold ?? 100;
+  const cooldown = options.cooldown ?? 620;
+  const minRange = options.minRange ?? 0.18;
 
   if (state.camera.phase === "up") {
     if (signal > down) {
@@ -836,7 +847,7 @@ function countByThreshold(signal, down, up, options = {}) {
 }
 
 function countHold(signal) {
-  if (signal > 0.62) {
+  if (signal > 0.54) {
     state.camera.holdStarted ??= performance.now();
     state.camera.count = Math.floor((performance.now() - state.camera.holdStarted) / 1000);
   } else {
@@ -846,7 +857,7 @@ function countHold(signal) {
 
 function countGeneralMotion(motion) {
   const signal = smoothSignal(normalize(motion, 0.008, 0.035));
-  countByThreshold(signal, 0.8, 0.25, { minHold: 220, minRange: 0.36, cooldown: 900 });
+  countByThreshold(signal, 0.68, 0.36, { minHold: 140, minRange: 0.22, cooldown: 760 });
   return signal;
 }
 
