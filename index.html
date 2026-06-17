@@ -11,7 +11,12 @@
     <main class="app">
       <header class="app-header">
         <h1>내 운동 루틴 <span aria-hidden="true">💪</span></h1>
-        <time id="todayDate"></time>
+        <div class="header-actions">
+          <time id="todayDate"></time>
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="라이트 모드로 변경">
+            <i data-lucide="sun"></i>
+          </button>
+        </div>
       </header>
 
       <section class="streak-card" aria-label="이번 주 운동 기록">

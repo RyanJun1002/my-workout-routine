@@ -16,6 +16,24 @@
   --shadow: 0 28px 80px rgba(0, 0, 0, 0.36);
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f6f7;
+  --panel: #ffffff;
+  --panel-2: #eef0f3;
+  --line: #d9dde3;
+  --line-strong: #c5cbd3;
+  --text: #15181d;
+  --muted: #5d6570;
+  --faint: #8a929d;
+  --blue: #1f72e8;
+  --green: #22b36f;
+  --purple: #8a56c5;
+  --orange: #db7321;
+  --red: #df4640;
+  --shadow: 0 18px 48px rgba(31, 37, 45, 0.1);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -57,6 +75,12 @@ button {
   margin-bottom: 20px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .app-header h1 {
   margin: 0;
   font-size: 22px;
@@ -70,6 +94,23 @@ button {
   font-size: 13px;
   white-space: nowrap;
   padding-top: 8px;
+}
+
+.theme-toggle {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 0;
+}
+
+.theme-toggle svg {
+  width: 13px;
+  height: 13px;
 }
 
 .streak-card,

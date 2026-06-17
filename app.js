@@ -126,6 +126,7 @@ const state = {
   todayId: getTodayId(),
   expanded: getTodayId(),
   screen: "today",
+  theme: loadTheme(),
   guideExercise: null,
   timer: { base: 30, remaining: 30, interval: null, running: false },
   camera: {
@@ -144,6 +145,7 @@ const state = {
 
 const els = {
   todayDate: document.querySelector("#todayDate"),
+  themeToggle: document.querySelector("#themeToggle"),
   streakCount: document.querySelector("#streakCount"),
   weekDots: document.querySelector("#weekDots"),
   tabs: [...document.querySelectorAll(".tab-button")],
@@ -200,6 +202,14 @@ function saveState() {
   localStorage.setItem("summerFitDarkState", JSON.stringify(state.data));
 }
 
+function loadTheme() {
+  return localStorage.getItem("summerFitTheme") || "dark";
+}
+
+function saveTheme() {
+  localStorage.setItem("summerFitTheme", state.theme);
+}
+
 function getTodayId() {
   return ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][new Date().getDay()];
 }
@@ -217,6 +227,7 @@ function formatToday() {
 }
 
 function render() {
+  applyTheme();
   els.todayDate.textContent = formatToday();
   renderTabs();
   renderWeekDots();
@@ -224,6 +235,19 @@ function render() {
   renderCameraOptions();
   renderStats();
   refreshIcons();
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = state.theme;
+  const nextMode = state.theme === "dark" ? "라이트" : "다크";
+  els.themeToggle.setAttribute("aria-label", `${nextMode} 모드로 변경`);
+  els.themeToggle.innerHTML = state.theme === "dark" ? '<i data-lucide="sun"></i>' : '<i data-lucide="moon"></i>';
+}
+
+function toggleTheme() {
+  state.theme = state.theme === "dark" ? "light" : "dark";
+  saveTheme();
+  render();
 }
 
 function renderTabs() {
@@ -781,6 +805,7 @@ document.addEventListener("click", (event) => {
 });
 
 els.tabs.forEach((button) => button.addEventListener("click", () => switchScreen(button.dataset.screen)));
+els.themeToggle.addEventListener("click", toggleTheme);
 els.guideCloseButton.addEventListener("click", closeGuide);
 els.guideBackdrop.addEventListener("click", (event) => {
   if (event.target === els.guideBackdrop) {
