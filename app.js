@@ -138,6 +138,11 @@ const state = {
     lastVideoTime: -1,
     count: 0,
     phase: "up",
+    pendingPhase: null,
+    pendingSince: 0,
+    lastCountAt: 0,
+    peakSignal: 0,
+    smoothedSignal: null,
     holdStarted: null,
     lastMotion: null,
   },
@@ -578,6 +583,8 @@ async function toggleCamera() {
     els.cameraVideo.srcObject = state.camera.stream;
     await els.cameraVideo.play();
     resizeCanvas();
+    enterCameraFullscreen();
+    resetCounter();
     els.cameraEmpty.classList.add("hidden");
     els.cameraButton.innerHTML = '<i data-lucide="square"></i>카메라 끄기';
     state.camera.raf = requestAnimationFrame(detectPose);
@@ -619,7 +626,22 @@ function stopCamera() {
   els.poseCanvas.getContext("2d").clearRect(0, 0, els.poseCanvas.width, els.poseCanvas.height);
   els.cameraEmpty.classList.remove("hidden");
   els.cameraButton.innerHTML = '<i data-lucide="camera"></i>카메라 켜기';
+  exitCameraFullscreen();
   refreshIcons();
+}
+
+function enterCameraFullscreen() {
+  document.body.classList.add("camera-fullscreen");
+  const fullscreenRequest = document.documentElement.requestFullscreen?.({ navigationUI: "hide" });
+  fullscreenRequest?.catch(() => {});
+  resizeCanvas();
+}
+
+function exitCameraFullscreen() {
+  document.body.classList.remove("camera-fullscreen");
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.().catch(() => {});
+  }
 }
 
 function resizeCanvas() {
@@ -662,30 +684,43 @@ function drawPose(result) {
 
 function analyzePose(landmarks) {
   if (!landmarks) {
+    resetMotionState();
     els.motionFeedback.textContent = "전신이 화면 안에 들어오게 한 걸음 뒤로 가보세요.";
     return;
   }
   const tracker = trackers[els.cameraExercise.value] || { mode: "motion", kind: "rep", label: "회" };
   const metrics = getMetrics(landmarks);
+  if (metrics.visibility < 0.55) {
+    resetMotionState();
+    els.motionMeter.style.width = "0%";
+    els.motionFeedback.textContent = "몸 전체가 더 잘 보이게 카메라에서 조금 멀어져 보세요.";
+    return;
+  }
+
   let signal = 0;
   if (tracker.mode === "squat") {
     signal = normalize(170 - Math.min(metrics.leftKnee, metrics.rightKnee), 15, 75);
-    countByThreshold(signal, 0.72, 0.35);
+    signal = smoothSignal(signal);
+    countByThreshold(signal, 0.76, 0.3, { minRange: 0.34, cooldown: 750 });
     els.motionFeedback.textContent = signal > 0.7 ? "좋아요. 올라올 때도 천천히 버텨요." : "무릎과 발끝 방향을 맞춰요.";
   } else if (tracker.mode === "pushup") {
     signal = normalize(170 - Math.min(metrics.leftElbow, metrics.rightElbow), 20, 85);
-    countByThreshold(signal, 0.68, 0.32);
+    signal = smoothSignal(signal);
+    countByThreshold(signal, 0.72, 0.28, { minRange: 0.32, cooldown: 750 });
     els.motionFeedback.textContent = signal > 0.65 ? "몸을 일직선으로 유지해요." : "팔꿈치를 천천히 굽혀요.";
   } else if (tracker.mode === "arms") {
     signal = normalize(metrics.wristLift, 0.05, 0.35);
-    countByThreshold(signal, 0.7, 0.38);
+    signal = smoothSignal(signal);
+    countByThreshold(signal, 0.76, 0.32, { minRange: 0.34, cooldown: 700 });
     els.motionFeedback.textContent = "어깨가 으쓱 올라가지 않게 목을 길게 둬요.";
   } else if (tracker.mode === "knees") {
     signal = normalize(metrics.kneeDrive, 0.06, 0.28);
-    countByThreshold(signal, 0.66, 0.34);
+    signal = smoothSignal(signal);
+    countByThreshold(signal, 0.72, 0.3, { minRange: 0.3, cooldown: 650 });
     els.motionFeedback.textContent = "복부에 힘을 주고 허리가 꺾이지 않게 해요.";
   } else if (tracker.mode === "hold") {
-    signal = normalize(metrics.holdQuality, 0.42, 0.84);
+    signal = getHoldSignal(metrics, els.cameraExercise.value);
+    signal = smoothSignal(signal);
     countHold(signal);
     els.motionFeedback.textContent = signal > 0.55 ? "자세 유지 중. 숨을 멈추지 마세요." : "몸이 화면 안에 잘 보이게 맞춰요.";
   } else {
@@ -704,6 +739,11 @@ function getMetrics(lm) {
   const wristLift = Math.max(p(11).y - p(15).y, p(12).y - p(16).y);
   const kneeDrive = Math.max(Math.abs(p(25).y - p(23).y), Math.abs(p(26).y - p(24).y));
   const holdQuality = Math.max(0, Math.min(1, (1 - Math.abs(p(11).y - p(12).y) * 8 + 1 - Math.abs(p(23).y - p(24).y) * 8) / 2));
+  const shoulderY = (p(11).y + p(12).y) / 2;
+  const hipY = (p(23).y + p(24).y) / 2;
+  const visibility = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]
+    .map((index) => lm[index]?.visibility ?? lm[index]?.presence ?? 1)
+    .reduce((sum, value) => sum + value, 0) / 12;
   const center = {
     x: (p(11).x + p(12).x + p(23).x + p(24).x) / 4,
     y: (p(11).y + p(12).y + p(23).y + p(24).y) / 4,
@@ -711,7 +751,35 @@ function getMetrics(lm) {
   const previous = state.camera.lastMotion;
   state.camera.lastMotion = center;
   const motion = previous ? Math.hypot(center.x - previous.x, center.y - previous.y) : 0;
-  return { leftElbow, rightElbow, leftKnee, rightKnee, wristLift, kneeDrive, holdQuality, motion };
+  return { leftElbow, rightElbow, leftKnee, rightKnee, wristLift, kneeDrive, holdQuality, shoulderY, hipY, visibility, motion };
+}
+
+function getHoldSignal(metrics, exerciseId) {
+  if (exerciseId === "wallSit") {
+    return normalize(165 - Math.min(metrics.leftKnee, metrics.rightKnee), 35, 85);
+  }
+  const torsoYDistance = Math.abs(metrics.shoulderY - metrics.hipY);
+  const horizontalBody = normalize(0.32 - torsoYDistance, 0.02, 0.2);
+  return Math.min(horizontalBody, metrics.holdQuality);
+}
+
+function smoothSignal(signal) {
+  if (state.camera.smoothedSignal === null) {
+    state.camera.smoothedSignal = signal;
+  } else {
+    state.camera.smoothedSignal = state.camera.smoothedSignal * 0.72 + signal * 0.28;
+  }
+  return state.camera.smoothedSignal;
+}
+
+function resetMotionState() {
+  state.camera.phase = "up";
+  state.camera.pendingPhase = null;
+  state.camera.pendingSince = 0;
+  state.camera.peakSignal = 0;
+  state.camera.smoothedSignal = null;
+  state.camera.holdStarted = null;
+  state.camera.lastMotion = null;
 }
 
 function angle(a, b, c) {
@@ -726,18 +794,49 @@ function normalize(value, min, max) {
   return Math.max(0, Math.min(1, (value - min) / (max - min)));
 }
 
-function countByThreshold(signal, down, up) {
-  if (state.camera.phase === "up" && signal > down) {
-    state.camera.phase = "down";
+function countByThreshold(signal, down, up, options = {}) {
+  const now = performance.now();
+  const minHold = options.minHold ?? 170;
+  const cooldown = options.cooldown ?? 700;
+  const minRange = options.minRange ?? 0.28;
+
+  if (state.camera.phase === "up") {
+    if (signal > down) {
+      if (state.camera.pendingPhase !== "down") {
+        state.camera.pendingPhase = "down";
+        state.camera.pendingSince = now;
+      }
+      if (now - state.camera.pendingSince >= minHold) {
+        state.camera.phase = "down";
+        state.camera.peakSignal = signal;
+        state.camera.pendingPhase = null;
+      }
+    } else {
+      state.camera.pendingPhase = null;
+    }
+    return;
   }
-  if (state.camera.phase === "down" && signal < up) {
-    state.camera.phase = "up";
-    state.camera.count += 1;
+
+  state.camera.peakSignal = Math.max(state.camera.peakSignal, signal);
+  if (signal < up && state.camera.peakSignal - signal >= minRange) {
+    if (state.camera.pendingPhase !== "up") {
+      state.camera.pendingPhase = "up";
+      state.camera.pendingSince = now;
+    }
+    if (now - state.camera.pendingSince >= minHold && now - state.camera.lastCountAt >= cooldown) {
+      state.camera.phase = "up";
+      state.camera.lastCountAt = now;
+      state.camera.peakSignal = 0;
+      state.camera.pendingPhase = null;
+      state.camera.count += 1;
+    }
+  } else {
+    state.camera.pendingPhase = null;
   }
 }
 
 function countHold(signal) {
-  if (signal > 0.48) {
+  if (signal > 0.62) {
     state.camera.holdStarted ??= performance.now();
     state.camera.count = Math.floor((performance.now() - state.camera.holdStarted) / 1000);
   } else {
@@ -746,8 +845,8 @@ function countHold(signal) {
 }
 
 function countGeneralMotion(motion) {
-  const signal = normalize(motion, 0.002, 0.018);
-  countByThreshold(signal, 0.72, 0.28);
+  const signal = smoothSignal(normalize(motion, 0.008, 0.035));
+  countByThreshold(signal, 0.8, 0.25, { minHold: 220, minRange: 0.36, cooldown: 900 });
   return signal;
 }
 
@@ -759,9 +858,8 @@ function updateCounter(kind, signal) {
 
 function resetCounter() {
   state.camera.count = 0;
-  state.camera.phase = "up";
-  state.camera.holdStarted = null;
-  state.camera.lastMotion = null;
+  resetMotionState();
+  state.camera.lastCountAt = 0;
   els.repCount.textContent = "0";
   els.motionMeter.style.width = "0%";
   updateTrackerLabel();
