@@ -99,7 +99,7 @@ const trackers = {
   ytPose: { label: "회", mode: "arms", kind: "rep" },
   crunch: { label: "회", mode: "motion", kind: "rep" },
   legRaise: { label: "회", mode: "knees", kind: "rep" },
-  superman: { label: "회", mode: "motion", kind: "rep" },
+  superman: { label: "회", mode: "superman", kind: "rep" },
 };
 
 const guides = {
@@ -145,6 +145,7 @@ const state = {
     lowSignal: 1,
     smoothedSignal: null,
     holdStarted: null,
+    holdGraceStarted: null,
     lastMotion: null,
   },
 };
@@ -494,8 +495,18 @@ function renderCameraGuide() {
   const detail = guides[exerciseId] || guide("천천히 진행하고 통증이 있으면 바로 쉬세요.", ["준비 자세를 확인해요.", "목표 횟수나 시간을 진행해요."]);
   const tracker = trackers[exerciseId] || { kind: "rep" };
   const countTip = tracker.kind === "time" ? "카메라가 자세를 유지한 시간을 초 단위로 세요." : "내려가거나 들어 올린 뒤 다시 돌아오면 1회로 세요.";
+  const cameraTips = [];
+  if (tracker.mode === "arms") {
+    cameraTips.push("폰을 가로로 돌리고 양쪽 어깨, 팔꿈치, 손목이 모두 보이게 해요.");
+  }
+  if (tracker.mode === "superman") {
+    cameraTips.push("팔과 다리를 동시에 들고 1초 정도 멈춘 뒤 내려오면 1회로 세요.");
+  }
+  if (tracker.mode === "squat") {
+    cameraTips.push("한 번 앉고 완전히 올라온 뒤 다음 동작을 시작해요.");
+  }
   els.cameraGuideTitle.textContent = exercise?.name || "운동 선택";
-  els.cameraGuideSteps.innerHTML = [countTip, ...detail.steps.slice(0, 3)].map((step) => `<li>${step}</li>`).join("");
+  els.cameraGuideSteps.innerHTML = [countTip, ...cameraTips, ...detail.steps.slice(0, 3)].slice(0, 5).map((step) => `<li>${step}</li>`).join("");
 }
 
 function openGuide(dayId, exerciseId) {
@@ -715,7 +726,14 @@ function analyzePose(landmarks) {
   }
   const tracker = trackers[els.cameraExercise.value] || { mode: "motion", kind: "rep", label: "회" };
   const metrics = getMetrics(landmarks);
-  if (metrics.visibility < 0.48) {
+  const neededVisibility = tracker.mode === "hold"
+    ? metrics.holdVisibility
+    : tracker.mode === "arms"
+      ? metrics.armVisibility
+      : tracker.mode === "superman"
+        ? metrics.supermanVisibility
+        : metrics.visibility;
+  if (neededVisibility < 0.46) {
     resetMotionState();
     els.motionMeter.style.width = "0%";
     els.motionFeedback.textContent = "몸 전체가 더 잘 보이게 카메라에서 조금 멀어져 보세요.";
@@ -726,7 +744,7 @@ function analyzePose(landmarks) {
   if (tracker.mode === "squat") {
     signal = normalize(170 - Math.min(metrics.leftKnee, metrics.rightKnee), 10, 70);
     signal = smoothSignal(signal);
-    countByThreshold(signal, 0.42, 0.34, { minHold: 60, minRange: 0.13, minReturn: 0.1, cooldown: 520 });
+    countByThreshold(signal, 0.54, 0.32, { minHold: 120, minRange: 0.24, minReturn: 0.18, cooldown: 780 });
     els.motionFeedback.textContent = signal > 0.7 ? "좋아요. 올라올 때도 천천히 버텨요." : "무릎과 발끝 방향을 맞춰요.";
   } else if (tracker.mode === "pushup") {
     signal = normalize(170 - Math.min(metrics.leftElbow, metrics.rightElbow), 20, 85);
@@ -734,6 +752,20 @@ function analyzePose(landmarks) {
     countByThreshold(signal, 0.48, 0.34, { minHold: 60, minRange: 0.14, minReturn: 0.11, cooldown: 540 });
     els.motionFeedback.textContent = signal > 0.65 ? "몸을 일직선으로 유지해요." : "팔꿈치를 천천히 굽혀요.";
   } else if (tracker.mode === "arms") {
+    if (window.innerHeight > window.innerWidth) {
+      resetMotionState();
+      signal = 0;
+      els.motionFeedback.textContent = "물병 운동은 폰을 가로로 돌리고 팔 전체가 보이게 해주세요.";
+      updateCounter(tracker.kind, signal);
+      return;
+    }
+    if (!metrics.armsInFrame || metrics.armVisibility < 0.62) {
+      resetMotionState();
+      signal = 0;
+      els.motionFeedback.textContent = "양쪽 어깨, 팔꿈치, 손목이 화면 안에 모두 보이게 물러서 주세요.";
+      updateCounter(tracker.kind, signal);
+      return;
+    }
     signal = normalize(metrics.wristLift, 0.05, 0.35);
     signal = smoothSignal(signal);
     countByThreshold(signal, 0.5, 0.35, { minHold: 50, minRange: 0.14, minReturn: 0.1, cooldown: 500 });
@@ -747,7 +779,12 @@ function analyzePose(landmarks) {
     signal = getHoldSignal(metrics, els.cameraExercise.value);
     signal = smoothSignal(signal);
     countHold(signal);
-    els.motionFeedback.textContent = signal > 0.55 ? "자세 유지 중. 숨을 멈추지 마세요." : "몸이 화면 안에 잘 보이게 맞춰요.";
+    els.motionFeedback.textContent = signal > 0.42 ? "자세 유지 중. 머리는 조금 움직여도 괜찮아요." : "어깨부터 골반까지 일직선이 되게 맞춰요.";
+  } else if (tracker.mode === "superman") {
+    signal = getSupermanSignal(metrics);
+    signal = smoothSignal(signal);
+    countByThreshold(signal, 0.62, 0.34, { minHold: 180, minRange: 0.24, minReturn: 0.18, cooldown: 1100 });
+    els.motionFeedback.textContent = signal > 0.6 ? "팔과 다리를 동시에 들고 잠깐 멈춰요." : "엎드린 상태에서 팔과 다리를 천천히 들어요.";
   } else {
     signal = countGeneralMotion(metrics.motion);
     els.motionFeedback.textContent = "반복 움직임을 보고 있어요. 같은 속도로 이어가요.";
@@ -757,6 +794,14 @@ function analyzePose(landmarks) {
 
 function getMetrics(lm) {
   const p = (index) => lm[index];
+  const pointVisibility = (index) => lm[index]?.visibility ?? lm[index]?.presence ?? 1;
+  const averageVisibility = (indexes) => indexes
+    .map((index) => pointVisibility(index))
+    .reduce((sum, value) => sum + value, 0) / indexes.length;
+  const inFrame = (index, margin = 0.04) => {
+    const point = p(index);
+    return point.x > margin && point.x < 1 - margin && point.y > margin && point.y < 1 - margin && pointVisibility(index) > 0.5;
+  };
   const leftElbow = angle(p(11), p(13), p(15));
   const rightElbow = angle(p(12), p(14), p(16));
   const leftKnee = angle(p(23), p(25), p(27));
@@ -766,9 +811,13 @@ function getMetrics(lm) {
   const holdQuality = Math.max(0, Math.min(1, (1 - Math.abs(p(11).y - p(12).y) * 8 + 1 - Math.abs(p(23).y - p(24).y) * 8) / 2));
   const shoulderY = (p(11).y + p(12).y) / 2;
   const hipY = (p(23).y + p(24).y) / 2;
-  const visibility = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]
-    .map((index) => lm[index]?.visibility ?? lm[index]?.presence ?? 1)
-    .reduce((sum, value) => sum + value, 0) / 12;
+  const wristY = (p(15).y + p(16).y) / 2;
+  const ankleY = (p(27).y + p(28).y) / 2;
+  const visibility = averageVisibility([11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]);
+  const armVisibility = averageVisibility([11, 12, 13, 14, 15, 16]);
+  const holdVisibility = averageVisibility([11, 12, 23, 24, 25, 26, 27, 28]);
+  const supermanVisibility = averageVisibility([11, 12, 15, 16, 23, 24, 27, 28]);
+  const armsInFrame = [11, 12, 13, 14, 15, 16].every((index) => inFrame(index));
   const center = {
     x: (p(11).x + p(12).x + p(23).x + p(24).x) / 4,
     y: (p(11).y + p(12).y + p(23).y + p(24).y) / 4,
@@ -776,7 +825,25 @@ function getMetrics(lm) {
   const previous = state.camera.lastMotion;
   state.camera.lastMotion = center;
   const motion = previous ? Math.hypot(center.x - previous.x, center.y - previous.y) : 0;
-  return { leftElbow, rightElbow, leftKnee, rightKnee, wristLift, kneeDrive, holdQuality, shoulderY, hipY, visibility, motion };
+  return {
+    leftElbow,
+    rightElbow,
+    leftKnee,
+    rightKnee,
+    wristLift,
+    kneeDrive,
+    holdQuality,
+    shoulderY,
+    hipY,
+    wristY,
+    ankleY,
+    visibility,
+    armVisibility,
+    holdVisibility,
+    supermanVisibility,
+    armsInFrame,
+    motion,
+  };
 }
 
 function getHoldSignal(metrics, exerciseId) {
@@ -784,8 +851,14 @@ function getHoldSignal(metrics, exerciseId) {
     return normalize(165 - Math.min(metrics.leftKnee, metrics.rightKnee), 35, 85);
   }
   const torsoYDistance = Math.abs(metrics.shoulderY - metrics.hipY);
-  const horizontalBody = normalize(0.32 - torsoYDistance, 0.02, 0.2);
-  return Math.min(horizontalBody, metrics.holdQuality);
+  const horizontalBody = normalize(0.38 - torsoYDistance, 0.03, 0.24);
+  return Math.max(0, Math.min(1, horizontalBody * 0.72 + metrics.holdQuality * 0.28));
+}
+
+function getSupermanSignal(metrics) {
+  const armLift = normalize(metrics.shoulderY - metrics.wristY, -0.02, 0.14);
+  const legLift = normalize(metrics.hipY - metrics.ankleY, -0.02, 0.12);
+  return Math.max(0, Math.min(1, armLift * 0.55 + legLift * 0.45));
 }
 
 function smoothSignal(signal) {
@@ -805,6 +878,7 @@ function resetMotionState() {
   state.camera.lowSignal = 1;
   state.camera.smoothedSignal = null;
   state.camera.holdStarted = null;
+  state.camera.holdGraceStarted = null;
   state.camera.lastMotion = null;
 }
 
@@ -868,11 +942,21 @@ function countByThreshold(signal, down, up, options = {}) {
 }
 
 function countHold(signal) {
-  if (signal > 0.48) {
+  if (signal > 0.42) {
     state.camera.holdStarted ??= performance.now();
+    state.camera.holdGraceStarted = null;
     state.camera.count = Math.floor((performance.now() - state.camera.holdStarted) / 1000);
+  } else if (state.camera.holdStarted) {
+    state.camera.holdGraceStarted ??= performance.now();
+    if (performance.now() - state.camera.holdGraceStarted < 1300) {
+      state.camera.count = Math.floor((performance.now() - state.camera.holdStarted) / 1000);
+      return;
+    }
+    state.camera.holdStarted = null;
+    state.camera.holdGraceStarted = null;
   } else {
     state.camera.holdStarted = null;
+    state.camera.holdGraceStarted = null;
   }
 }
 
